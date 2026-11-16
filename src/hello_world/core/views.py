@@ -1,6 +1,5 @@
 import io
 import logging
-import os
 import secrets
 import sys
 
@@ -9,21 +8,30 @@ from django.contrib.auth import get_user_model
 from django.core.management import call_command
 from django.http import HttpRequest, HttpResponse, JsonResponse
 from django.shortcuts import render
+from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
 
 logger = logging.getLogger(__name__)
 
 
+def _extract_provided_secret(request: HttpRequest) -> str:
+    """Extract Bearer token or X-Admin-Password header from request."""
+    auth_header = request.headers.get("Authorization", "").strip()
+    if auth_header.lower().startswith("bearer "):
+        return auth_header[7:].strip()
+    return request.headers.get("X-Admin-Password", "").strip()
+
+
 def _is_management_authorized(request: HttpRequest) -> bool:
-    """Authorize management endpoints via superuser or management token."""
+    """Authorize management endpoints via superuser or superuser password."""
     user = getattr(request, "user", None)
     if user and user.is_authenticated and user.is_superuser:
         return True
 
-    expected_token = getattr(settings, "CF_MANAGEMENT_TOKEN", "")
-    provided_token = request.headers.get("X-CF-Management-Token", "")
-    if expected_token and provided_token:
-        return secrets.compare_digest(provided_token, expected_token)
+    expected_secret = getattr(settings, "DJANGO_SUPERUSER_PASSWORD", "")
+    provided_secret = _extract_provided_secret(request)
+    if expected_secret and provided_secret:
+        return secrets.compare_digest(provided_secret, expected_secret)
 
     return False
 
@@ -59,6 +67,7 @@ def healthz(request: HttpRequest) -> JsonResponse:
     )
 
 
+@csrf_exempt
 @require_http_methods(["GET", "POST"])
 def run_migrations_view(request: HttpRequest) -> JsonResponse:
     """Apply Django migrations programmatically for serverless D1."""
@@ -80,12 +89,14 @@ def run_migrations_view(request: HttpRequest) -> JsonResponse:
         )
     except Exception as exc:
         logger.exception("Failed to apply database migrations")
+        error_msg = str(exc) if settings.DEBUG else "Migration failed."
         return JsonResponse(
-            {"status": "error", "message": str(exc)},
+            {"status": "error", "message": error_msg},
             status=500,
         )
 
 
+@csrf_exempt
 @require_http_methods(["GET", "POST"])
 def create_admin_view(request: HttpRequest) -> JsonResponse:
     """Ensure an initial superuser exists for serverless D1 deployments."""
@@ -103,15 +114,15 @@ def create_admin_view(request: HttpRequest) -> JsonResponse:
 
     username = (
         request.POST.get("username")
-        or os.environ.get("DJANGO_SUPERUSER_USERNAME", "admin")
+        or getattr(settings, "DJANGO_SUPERUSER_USERNAME", "admin")
     )
     email = (
         request.POST.get("email")
-        or os.environ.get("DJANGO_SUPERUSER_EMAIL", "admin@example.com")
+        or getattr(settings, "DJANGO_SUPERUSER_EMAIL", "admin@example.com")
     )
     password = (
         request.POST.get("password")
-        or os.environ.get("DJANGO_SUPERUSER_PASSWORD", "")
+        or getattr(settings, "DJANGO_SUPERUSER_PASSWORD", "")
     )
 
     if not password:

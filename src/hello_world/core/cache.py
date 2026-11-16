@@ -17,10 +17,12 @@ import logging
 import os
 from pathlib import Path
 import pickle
+import tempfile
 import threading
 import time
 from typing import Any
 
+from django.conf import settings
 from django.core.cache.backends.base import DEFAULT_TIMEOUT, BaseCache
 
 logger = logging.getLogger(__name__)
@@ -31,7 +33,15 @@ _worker_env_var: contextvars.ContextVar[Any] = contextvars.ContextVar(
 )
 _fallback_worker_env: Any = None
 
-LOCAL_CACHE_ROOT = Path("/tmp/django_cf_cache")
+DEFAULT_LOCAL_CACHE_ROOT = Path(tempfile.gettempdir()) / "django_cf_cache"
+
+
+def _get_local_cache_root() -> Path:
+    """Resolve the local fallback cache root from settings or system temp."""
+    configured = getattr(settings, "LOCAL_CACHE_ROOT", None)
+    if configured:
+        return Path(configured)
+    return DEFAULT_LOCAL_CACHE_ROOT
 
 
 def set_worker_env(env: Any) -> None:
@@ -95,7 +105,7 @@ class _CloudflareBaseCache(BaseCache):
         self._location = (location or "cache").strip("/")
         self._binding_name = str(options.get("binding", ""))
         subdir = self._location or "default"
-        self._local_dir = LOCAL_CACHE_ROOT / self.tier_name / subdir
+        self._local_dir = _get_local_cache_root() / self.tier_name / subdir
         self._lock = threading.RLock()
 
     def _get_binding(self) -> Any:

@@ -49,6 +49,17 @@ A **Django** project template configured to run on **Cloudflare Python Workers**
 
 ---
 
+## Configuration: Non-Secrets (`wrangler.jsonc`) vs. Secrets (`.dev.vars`)
+
+- **Non-Secret Settings (`wrangler.jsonc` -> `"vars"`):**
+  All non-sensitive configuration (`LANGUAGE_CODE`, `TIME_ZONE`, `ALLOWED_HOSTS`, `X_FRAME_OPTIONS`, cache bindings/TTLs, R2/Access toggles, and default `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_EMAIL`) lives in `wrangler.jsonc` under `"vars"` and is automatically read by both Cloudflare Workers and local `manage.py` commands.
+- **Secrets (`.dev.vars` locally / Cloudflare Secrets in production):**
+  Only standard Django secrets live in `.dev.vars` locally and are uploaded via `uv run pywrangler secret put` in production:
+  - `SECRET_KEY`: Django cryptographic signing key.
+  - `DJANGO_SUPERUSER_PASSWORD`: Standard Django superuser password. Also authorizes initial serverless bootstrap requests (`/__run_migrations__/` and `/__create_admin__/`) via `Authorization: Bearer <DJANGO_SUPERUSER_PASSWORD>`.
+
+---
+
 ## Deploying to Cloudflare Workers (`uv run pywrangler`)
 
 `pywrangler` proxies all Wrangler commands while automatically syncing Python dependencies into `python_modules/` for the Cloudflare Workers runtime.
@@ -70,7 +81,7 @@ Update `database_id` and `kv_namespaces[0].id` in `wrangler.jsonc` with the gene
 
 ```bash
 uv run pywrangler secret put SECRET_KEY
-uv run pywrangler secret put CF_MANAGEMENT_TOKEN
+uv run pywrangler secret put DJANGO_SUPERUSER_PASSWORD
 ```
 
 ### 2. Collect Static Assets & Run / Deploy
@@ -87,10 +98,10 @@ uv run pywrangler deploy
 ```
 
 ### 3. Serverless Management Endpoints
-Because Workers do not provide an interactive shell, the template exposes protected endpoints (requires an authenticated `superuser` session or the `X-CF-Management-Token` header):
+Because Workers do not provide an interactive shell, the template exposes protected endpoints (requires an authenticated `superuser` session or `Authorization: Bearer <DJANGO_SUPERUSER_PASSWORD>`):
 
-- `GET /__run_migrations__/`: Runs `migrate` programmatically against Cloudflare D1.
-- `POST /__create_admin__/`: Creates the initial superuser (`username`, `email`, `password`).
+- `GET` or `POST /__run_migrations__/`: Runs `migrate` programmatically against Cloudflare D1.
+- `GET` or `POST /__create_admin__/`: Creates the initial superuser using `DJANGO_SUPERUSER_USERNAME`, `DJANGO_SUPERUSER_EMAIL`, and `DJANGO_SUPERUSER_PASSWORD`.
 - `GET /healthz/`: Returns runtime status, active database engine, cache backend, cache tiers, and bytecode status.
 
 ---

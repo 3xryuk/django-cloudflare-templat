@@ -6,7 +6,7 @@ from unittest.mock import patch
 from django.conf import settings
 from django.contrib.auth import get_user_model
 from django.core.cache import caches
-from django.test import TestCase, override_settings
+from django.test import Client, TestCase, override_settings
 from django.urls import reverse
 
 from .models import DeploymentNote
@@ -85,12 +85,13 @@ class CoreTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
 
-    @override_settings(CF_MANAGEMENT_TOKEN="secret-cf-token")
-    def test_run_migrations_accepts_management_token(self) -> None:
+    @override_settings(DJANGO_SUPERUSER_PASSWORD="secret-admin-password")
+    def test_run_migrations_accepts_bearer_superuser_password(self) -> None:
+        csrf_client = Client(enforce_csrf_checks=True)
         url = reverse("run_migrations")
-        response = self.client.get(
+        response = csrf_client.post(
             url,
-            HTTP_X_CF_MANAGEMENT_TOKEN="secret-cf-token",
+            HTTP_AUTHORIZATION="Bearer secret-admin-password",
         )
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json()["status"], "ok")
@@ -161,3 +162,12 @@ class CoreTests(TestCase):
                 default="fallback-value",
             )
             self.assertEqual(resolved, "fallback-value")
+
+    def test_wrangler_vars_loaded_for_non_secrets(self) -> None:
+        from hello_world import settings as project_settings
+
+        wrangler_path = Path(settings.REPO_ROOT) / "wrangler.jsonc"
+        wrangler_vars = project_settings._parse_wrangler_vars(wrangler_path)
+        self.assertEqual(wrangler_vars.get("LANGUAGE_CODE"), "en-us")
+        self.assertEqual(wrangler_vars.get("X_FRAME_OPTIONS"), "SAMEORIGIN")
+        self.assertEqual(settings.X_FRAME_OPTIONS, "SAMEORIGIN")

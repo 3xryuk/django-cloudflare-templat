@@ -3,13 +3,19 @@
 Configured for dual-mode operation:
 - Local development (SQLite + optional django-browser-reload)
 - Cloudflare Python Workers via django-cf (D1, R2, Static Assets, Access)
+
+Non-secret configuration is defined in `wrangler.jsonc` under `"vars"`.
+Secrets (`SECRET_KEY`, `DJANGO_SUPERUSER_PASSWORD`) are loaded from
+`.dev.vars` locally or Cloudflare Worker Secrets in production.
 """
 
 from collections.abc import Callable
 import importlib.util
+import json
 import os
 from pathlib import Path
 import sys
+import tempfile
 from typing import Any
 
 # Avoid writing __pycache__/*.pyc files to save Worker V8 memory.
@@ -41,6 +47,39 @@ def _parse_env_file(path: Path) -> dict[str, str]:
     return values
 
 
+def _parse_wrangler_vars(path: Path) -> dict[str, str]:
+    """Parse non-secret configuration variables from wrangler.jsonc 'vars'."""
+    if not path.is_file():
+        return {}
+    clean_lines = [
+        line
+        for line in path.read_text(encoding="utf-8").splitlines()
+        if not line.strip().startswith("//")
+    ]
+    try:
+        payload = json.loads("\n".join(clean_lines))
+    except ValueError:
+        return {}
+    raw_vars = payload.get("vars", {})
+    if not isinstance(raw_vars, dict):
+        return {}
+    parsed: dict[str, str] = {}
+    for key, val in raw_vars.items():
+        if val is None:
+            continue
+        if sys.platform != "emscripten" and key in (
+            "USE_CLOUDFLARE_WORKER",
+            "DEBUG",
+        ):
+            continue
+        parsed[str(key)] = str(val)
+    return parsed
+
+
+_WRANGLER_VARS_CACHE: dict[str, str] = _parse_wrangler_vars(
+    REPO_ROOT / "wrangler.jsonc",
+)
+
 _DOTENV_CACHE: dict[str, str] = {
     **_parse_env_file(REPO_ROOT / ".env"),
     **_parse_env_file(REPO_ROOT / ".dev.vars"),
@@ -71,7 +110,7 @@ def get_env(
     default: Any = None,
     cast: Callable[[Any], Any] | type | None = None,
 ) -> Any:
-    """Resolve config from workers.env, os.environ, .dev.vars/.env, default."""
+    """Resolve config: workers.env -> os.environ -> .dev.vars -> wrangler."""
     raw: Any = None
 
     if sys.platform == "emscripten":
@@ -87,8 +126,11 @@ def get_env(
     if raw is None:
         raw = os.environ.get(key)
 
-    if raw is None:
+    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
         raw = _DOTENV_CACHE.get(key)
+
+    if raw is None or (isinstance(raw, str) and raw.strip() == ""):
+        raw = _WRANGLER_VARS_CACHE.get(key)
 
     if raw is None or (isinstance(raw, str) and raw.strip() == ""):
         return default
@@ -117,7 +159,13 @@ ALLOWED_HOSTS = [
     if host.strip()
 ]
 
-if "CODESPACE_NAME" in os.environ:
+if get_env("CSRF_TRUSTED_ORIGINS", default=""):
+    CSRF_TRUSTED_ORIGINS = [
+        origin.strip()
+        for origin in get_env("CSRF_TRUSTED_ORIGINS", default="").split(",")
+        if origin.strip()
+    ]
+elif "CODESPACE_NAME" in os.environ:
     codespace_name = get_env("CODESPACE_NAME", default="")
     codespace_domain = get_env(
         "GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN",
@@ -127,15 +175,20 @@ if "CODESPACE_NAME" in os.environ:
         CSRF_TRUSTED_ORIGINS = [
             f"https://{codespace_name}-8000.{codespace_domain}",
         ]
-elif get_env("CSRF_TRUSTED_ORIGINS", default=""):
-    CSRF_TRUSTED_ORIGINS = [
-        origin.strip()
-        for origin in get_env("CSRF_TRUSTED_ORIGINS", default="").split(",")
-        if origin.strip()
-    ]
 
-# Optional token for remote management endpoints
-CF_MANAGEMENT_TOKEN = get_env("CF_MANAGEMENT_TOKEN", default="")
+# Standard Django superuser settings (also authorizes management endpoints)
+DJANGO_SUPERUSER_USERNAME = get_env(
+    "DJANGO_SUPERUSER_USERNAME",
+    default="admin",
+)
+DJANGO_SUPERUSER_EMAIL = get_env(
+    "DJANGO_SUPERUSER_EMAIL",
+    default="admin@example.com",
+)
+DJANGO_SUPERUSER_PASSWORD = get_env(
+    "DJANGO_SUPERUSER_PASSWORD",
+    default="",
+)
 
 USE_CLOUDFLARE_R2 = get_env("USE_CLOUDFLARE_R2", default=False, cast=bool)
 USE_CLOUDFLARE_ACCESS = get_env(
@@ -143,6 +196,19 @@ USE_CLOUDFLARE_ACCESS = get_env(
     default=False,
     cast=bool,
 )
+CLOUDFLARE_ACCESS_TEAM_NAME = get_env(
+    "CLOUDFLARE_ACCESS_TEAM_NAME",
+    default=None,
+)
+CLOUDFLARE_ACCESS_AUD = get_env("CLOUDFLARE_ACCESS_AUD", default=None)
+CLOUDFLARE_ACCESS_EXEMPT_PATHS = [
+    path.strip()
+    for path in get_env(
+        "CLOUDFLARE_ACCESS_EXEMPT_PATHS",
+        default="/healthz/,/static/,/favicon.ico",
+    ).split(",")
+    if path.strip()
+]
 HAS_BROWSER_RELOAD = (
     DEBUG
     and not IS_CLOUDFLARE_WORKER
@@ -177,7 +243,9 @@ MIDDLEWARE = [
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
 ]
 
-if USE_CLOUDFLARE_ACCESS:
+if USE_CLOUDFLARE_ACCESS and (
+    CLOUDFLARE_ACCESS_TEAM_NAME or CLOUDFLARE_ACCESS_AUD
+):
     auth_middleware = "django.contrib.auth.middleware.AuthenticationMiddleware"
     auth_index = MIDDLEWARE.index(auth_middleware)
     MIDDLEWARE.insert(
@@ -190,7 +258,20 @@ if HAS_BROWSER_RELOAD:
         "django_browser_reload.middleware.BrowserReloadMiddleware"
     )
 
-X_FRAME_OPTIONS = "ALLOW-FROM preview.app.github.dev"
+X_FRAME_OPTIONS = get_env("X_FRAME_OPTIONS", default="SAMEORIGIN")
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+SECURE_CONTENT_TYPE_NOSNIFF = True
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SECURE = get_env(
+    "SESSION_COOKIE_SECURE",
+    default=not DEBUG,
+    cast=bool,
+)
+CSRF_COOKIE_SECURE = get_env(
+    "CSRF_COOKIE_SECURE",
+    default=not DEBUG,
+    cast=bool,
+)
 
 ROOT_URLCONF = "hello_world.urls"
 
@@ -267,9 +348,9 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = "en-us"
+LANGUAGE_CODE = get_env("LANGUAGE_CODE", default="en-us")
 
-TIME_ZONE = "UTC"
+TIME_ZONE = get_env("TIME_ZONE", default="UTC")
 
 USE_I18N = True
 
@@ -295,7 +376,7 @@ if USE_CLOUDFLARE_R2:
             "BACKEND": "django_cf.storage.R2Storage",
             "OPTIONS": {
                 "binding": get_env("CF_R2_BINDING", default="BUCKET"),
-                "location": "media",
+                "location": get_env("CF_R2_MEDIA_LOCATION", default="media"),
             },
         },
         "staticfiles": {
@@ -306,6 +387,12 @@ if USE_CLOUDFLARE_R2:
 
 # Multi-tier Cloudflare Caching (avoids LocMemCache inside V8 isolate RAM)
 
+LOCAL_CACHE_ROOT = Path(
+    get_env(
+        "LOCAL_CACHE_DIR",
+        default=str(Path(tempfile.gettempdir()) / "django_cf_cache"),
+    )
+)
 CF_CACHE_TIMEOUT = get_env("CF_CACHE_TIMEOUT", default=300, cast=int)
 DEFAULT_CACHE_TIER = get_env("CF_DEFAULT_CACHE_BACKEND", default="r2").lower()
 
@@ -313,31 +400,34 @@ _CACHE_TIERS: dict[str, dict[str, Any]] = {
     "r2": {
         "BACKEND": "hello_world.core.cache.R2Cache",
         "LOCATION": get_env("CF_R2_CACHE_PREFIX", default="cache"),
-        "TIMEOUT": 3600,
+        "TIMEOUT": get_env("CF_R2_CACHE_TIMEOUT", default=3600, cast=int),
         "OPTIONS": {
             "binding": get_env("CF_R2_CACHE_BINDING", default="BUCKET"),
         },
     },
     "do": {
         "BACKEND": "hello_world.core.cache.DurableObjectCache",
-        "LOCATION": "do-cache",
-        "TIMEOUT": 300,
+        "LOCATION": get_env("CF_DO_CACHE_LOCATION", default="do-cache"),
+        "TIMEOUT": get_env("CF_DO_CACHE_TIMEOUT", default=300, cast=int),
         "OPTIONS": {
             "binding": get_env("CF_DO_CACHE_BINDING", default="CACHE_DO"),
         },
     },
     "kv": {
         "BACKEND": "hello_world.core.cache.CloudflareKVCache",
-        "LOCATION": "kv-cache",
-        "TIMEOUT": 600,
+        "LOCATION": get_env("CF_KV_CACHE_LOCATION", default="kv-cache"),
+        "TIMEOUT": get_env("CF_KV_CACHE_TIMEOUT", default=600, cast=int),
         "OPTIONS": {
             "binding": get_env("CF_KV_CACHE_BINDING", default="CACHE_KV"),
         },
     },
     "db": {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",
-        "LOCATION": "django_cache_table",
-        "TIMEOUT": 300,
+        "LOCATION": get_env(
+            "CF_DB_CACHE_LOCATION",
+            default="django_cache_table",
+        ),
+        "TIMEOUT": get_env("CF_DB_CACHE_TIMEOUT", default=300, cast=int),
     },
 }
 

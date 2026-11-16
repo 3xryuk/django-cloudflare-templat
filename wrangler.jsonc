@@ -6,14 +6,43 @@
   "compatibility_flags": [
     "python_workers"
   ],
+  // Non-secret configuration variables.
+  // Keep secrets (SECRET_KEY, DJANGO_SUPERUSER_PASSWORD) in .dev.vars locally
+  // and upload them with `uv run pywrangler secret put` in production.
   "vars": {
     "DEBUG": "False",
     "ALLOWED_HOSTS": "*",
+    "CSRF_TRUSTED_ORIGINS": "",
+    "X_FRAME_OPTIONS": "SAMEORIGIN",
+    "LANGUAGE_CODE": "en-us",
+    "TIME_ZONE": "UTC",
     "PYTHONDONTWRITEBYTECODE": "1",
     "USE_CLOUDFLARE_WORKER": "True",
     "USE_CLOUDFLARE_R2": "False",
     "USE_CLOUDFLARE_ACCESS": "False",
-    "CF_DEFAULT_CACHE_BACKEND": "r2"
+    "CLOUDFLARE_ACCESS_TEAM_NAME": "",
+    "CLOUDFLARE_ACCESS_AUD": "",
+    "CLOUDFLARE_ACCESS_EXEMPT_PATHS": "/healthz/,/static/,/favicon.ico",
+    "CF_DB_ENGINE": "django_cf.db.backends.d1",
+    "CF_D1_BINDING": "DB",
+    "CF_R2_BINDING": "BUCKET",
+    "CF_R2_MEDIA_LOCATION": "media",
+    "CF_DEFAULT_CACHE_BACKEND": "r2",
+    "CF_CACHE_TIMEOUT": "300",
+    "CF_R2_CACHE_BINDING": "BUCKET",
+    "CF_R2_CACHE_PREFIX": "cache",
+    "CF_R2_CACHE_TIMEOUT": "3600",
+    "CF_DO_CACHE_BINDING": "CACHE_DO",
+    "CF_DO_CACHE_LOCATION": "do-cache",
+    "CF_DO_CACHE_TIMEOUT": "300",
+    "CF_KV_CACHE_BINDING": "CACHE_KV",
+    "CF_KV_CACHE_LOCATION": "kv-cache",
+    "CF_KV_CACHE_TIMEOUT": "600",
+    "CF_DB_CACHE_LOCATION": "django_cache_table",
+    "CF_DB_CACHE_TIMEOUT": "300",
+    "SESSION_CACHE_ALIAS": "do",
+    "DJANGO_SUPERUSER_USERNAME": "admin",
+    "DJANGO_SUPERUSER_EMAIL": "admin@example.com"
   },
   "assets": {
     "directory": "./staticfiles",

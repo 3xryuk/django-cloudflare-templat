@@ -1,0 +1,58 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "django-cf-template",
+  "main": "src/index.py",
+  "compatibility_date": "2026-09-01",
+  "compatibility_flags": [
+    "python_workers"
+  ],
+  "vars": {
+    "DEBUG": "False",
+    "ALLOWED_HOSTS": "*",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "USE_CLOUDFLARE_WORKER": "True",
+    "USE_CLOUDFLARE_R2": "False",
+    "USE_CLOUDFLARE_ACCESS": "False",
+    "CF_DEFAULT_CACHE_BACKEND": "r2"
+  },
+  "assets": {
+    "directory": "./staticfiles",
+    "binding": "ASSETS"
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "django-cf-db",
+      "database_id": "00000000-0000-0000-0000-000000000000"
+    }
+  ],
+  // Serves both media uploads (media/) and persistent R2 cache entries (cache/)
+  "r2_buckets": [
+    {
+      "binding": "BUCKET",
+      "bucket_name": "django-cf-media"
+    }
+  ],
+  "kv_namespaces": [
+    {
+      "binding": "CACHE_KV",
+      "id": "00000000000000000000000000000000"
+    }
+  ],
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "CACHE_DO",
+        "class_name": "CacheDurableObject"
+      }
+    ]
+  },
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_sqlite_classes": [
+        "CacheDurableObject"
+      ]
+    }
+  ]
+}

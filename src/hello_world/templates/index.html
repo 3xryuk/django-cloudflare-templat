@@ -1,0 +1,48 @@
+{% load static %}
+
+<!doctype html>
+<html lang="en">
+
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="description" content="Django on Cloudflare Workers (django-cf)">
+    <meta name="theme-color" content="#000000">
+    <title>{% block title %}{{ title }} | Cloudflare Workers Template{% endblock %}</title>
+
+    <link rel="icon" type="image/png" href="{% static 'Octocat.png' %}">
+    <link rel="stylesheet" href="{% static 'main.css' %}">
+</head>
+
+<body>
+    <div class="App">
+        <header class="App-header">
+            <img src="{% static 'Octocat.png' %}" class="App-logo" alt="logo" />
+            <p>
+                Django <span class="heart">♥️</span> Cloudflare Workers (<code>django-cf</code>)
+            </p>
+            <p class="small">
+                Runtime: <strong>{% if is_cloudflare_worker %}Cloudflare Workers{% else %}Local Dev{% endif %}</strong>
+                &bull;
+                DB Engine: <code>{{ db_engine }}</code>
+            </p>
+            <p class="small">
+                Cache Backend: <code>{{ cache_backend }}</code>
+                &bull;
+                Tiers: <code>{{ cache_tiers|join:", " }}</code>
+                &bull;
+                Bytecode Disabled: <code>{{ bytecode_disabled }}</code>
+            </p>
+            {% if cf_ray %}
+            <p class="small">
+                CF-Ray: <code>{{ cf_ray }}</code>{% if cf_country %} &bull; Country: <code>{{ cf_country }}</code>{% endif %}
+            </p>
+            {% endif %}
+            <p class="small">
+                Edit <code>src/hello_world/templates/index.html</code> and deploy with <code>pywrangler</code> or <code>wrangler</code>!
+            </p>
+        </header>
+    </div>
+</body>
+
+</html>

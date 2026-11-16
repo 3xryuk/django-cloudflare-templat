@@ -1,5 +1,29 @@
+# Local databases & media
 db.sqlite3
+db.sqlite3-*
+media/
+
+# Python bytecode & caches
 __pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# Collected static assets (rebuilt via manage.py collectstatic)
 staticfiles/
+
+# Local secrets & environment variables
 .env
+.env.local
+.dev.vars
+.dev.vars.*
+.agents
+# Virtual environments
 venv/
+.venv/
+.venv-workers/
+
+# Cloudflare Wrangler / Pywrangler local artifacts
+.wrangler/
+python_modules/
+node_modules/
